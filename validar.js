@@ -2,18 +2,15 @@ const { chromium } = require('playwright');
 const path = require('path');
 
 async function validarPDF(caminhoDoArquivo) {
-  const browser = await chromium.launch({ headless: false });
+  const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
 
   try {
-    console.log('▶️ Acessando site...');
     await page.goto('https://validar.iti.gov.br/', { waitUntil: 'domcontentloaded' });
 
-    console.log('▶️ Aceitando os termos...');
     await page.waitForSelector('#acceptTerms', { timeout: 10000 });
     await page.check('#acceptTerms');
 
-    console.log('▶️ Tornando o campo de upload visível...');
     await page.evaluate(() => {
       const fileInput = document.getElementById('signature_files');
       if (fileInput) {
@@ -21,33 +18,54 @@ async function validarPDF(caminhoDoArquivo) {
       }
     });
 
-    console.log('▶️ Enviando o arquivo...');
     await page.setInputFiles('#signature_files', caminhoDoArquivo);
 
-    console.log('▶️ Clicando no botão validar...');
     await page.waitForSelector('#validateSignature', { timeout: 10000 });
     await page.click('#validateSignature');
 
-    console.log('▶️ Aguardando relatório...');
-    await page.waitForSelector('#nomeArquivo', { timeout: 60000 });
+    const resultado = await Promise.race([
+      page.waitForSelector('#nomeArquivo', { timeout: 60000 }).then(() => 'relatorio'),
+      page.waitForSelector('#swal2-html-container', { timeout: 60000 }).then(() => 'erro')
+    ]);
 
-    console.log('▶️ Extraindo informações do relatório...');
+    if (resultado === 'relatorio') {
+      const dadosRelatorio = await page.evaluate(() => {
+        return {
+          nomeArquivo: document.querySelector('#nomeArquivo')?.innerText || null,
+          hashArquivo: document.querySelector('#hashArquivo')?.innerText || null,
+          dataValidacao: document.querySelector('#dataValidacao')?.innerText || null,
+          assinante: document.querySelector('assinatura .assinadoPor + .espaco')?.innerText || null,
+          cpfAssinante: document.querySelector('assinatura .identificador + .espaco')?.innerText || null,
+          numeroSerieCertificado: document.querySelector('assinatura .numserie + .espaco')?.innerText || null,
+          dataAssinatura: document.querySelector('assinatura .dataDaValidacao + .espaco')?.innerText || null,
+          mensagemValidade: document.querySelector('assinatura .frase')?.innerText || null
+        };
+      });
 
-    const dadosRelatorio = await page.evaluate(() => {
-      return {
-        nomeArquivo: document.querySelector('#nomeArquivo')?.innerText || null,
-        hashArquivo: document.querySelector('#hashArquivo')?.innerText || null,
-        dataValidacao: document.querySelector('#dataValidacao')?.innerText || null,
-        assinante: document.querySelector('.assinadoPor')?.nextSibling?.textContent?.trim() || null,
-        mensagemValidade: document.querySelector('.frase')?.innerText || null
+      const resposta = {
+        status: "ok",
+        dados: dadosRelatorio
       };
-    });
 
-    console.log('\n✅ Dados extraídos:');
-    console.log(JSON.stringify(dadosRelatorio, null, 2));
+      console.log(JSON.stringify(resposta, null, 2));
+      
+    } else if (resultado === 'erro') {
+      const mensagemErro = await page.$eval('#swal2-html-container', el => el.innerText);
+
+      const resposta = {
+        status: "erro",
+        mensagem: mensagemErro
+      };
+
+      console.log(JSON.stringify(resposta, null, 2));
+    }
 
   } catch (error) {
-    console.error('❌ Erro durante a validação:', error);
+    const resposta = {
+      status: "erro",
+      mensagem: "Erro inesperado na validação: " + error.message
+    };
+    console.log(JSON.stringify(resposta, null, 2));
   } finally {
     await browser.close();
   }
@@ -57,7 +75,10 @@ async function validarPDF(caminhoDoArquivo) {
 const args = process.argv.slice(2);
 
 if (args.length === 0) {
-  console.error('⚠️  Informe o caminho do arquivo PDF!\nExemplo:\nnode validar.js caminho/para/arquivo.pdf');
+  console.error(JSON.stringify({
+    status: "erro",
+    mensagem: "Nenhum arquivo PDF informado."
+  }));
   process.exit(1);
 }
 
