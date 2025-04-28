@@ -8,7 +8,7 @@ Valida assinaturas digitais do gov.br
 
 ## Uso
 
-npm validar.js arquivo.pdf
+node validar.js arquivo.pdf
 
 ## Retorno
 
